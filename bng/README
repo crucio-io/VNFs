@@ -1,0 +1,169 @@
+##
+# Copyright(c) 2010-2014 Intel Corporation.
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+#
+#   * Redistributions of source code must retain the above copyright
+#     notice, this list of conditions and the following disclaimer.
+#   * Redistributions in binary form must reproduce the above copyright
+#     notice, this list of conditions and the following disclaimer in
+#     the documentation and/or other materials provided with the
+#     distribution.
+#   * Neither the name of Intel Corporation nor the names of its
+#     contributors may be used to endorse or promote products derived
+#     from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+##
+
+Description
+-----------
+
+Intel(r) DPDK based Prototype Application implementing a simplified
+BRAS/BNG but also possibly other finer grained network functions (QoS,
+Routing, load-balancing, ...)
+
+Compile and run this application
+--------------------------------
+
+Download and set up DPDK from http://www.intel.com/go/dpdk. Apply the
+patch for the correct version of DPDK from the dpdk-patches directory
+(this application has mainly been tested with DPDK version 1.7.0 but
+it is also compatible with DPDK versions 1.7.1 and 1.8.0-rc1). The
+Makefile with this application expects RTE_SDK to point to the root
+directory of DPDK (i.e. export RTE_SDK=/root/dpdk). If RTE_TARGET has
+not been set, x86_64-native-linuxapp-gcc will be assumed.
+
+After DPDK has been set up, run make from the directory where you
+extracted this application. A build directory will be created
+containing the dppd executable. The usage of the application is shown
+below (Note that this application assumes that all required ports have
+been bound to the DPDK provided igb_uio driver. Refer to the "Getting
+Started Guide - DPDK" document for more details).
+
+  ./build/dppd [-f CONFIG_FILE] [-a|-e] [-s|-i]
+	-f CONFIG_FILE : configuration file to load, ./dppd.cfg by default
+	-a : autostart all ports (by default)
+	-e : don't autostart
+	-s : check configuration file syntax and exit
+	-i : check initialization sequence and exit
+        -w : variable definition: syntax is varname=value
+
+While applications using DPDK rely on the core mask and the number of
+channels to be set, this application is configured using a .cfg file.
+For example, to run the application from the source directory execute:
+
+  user@target:~$ ./build/dppd -f ./config/handle_none.cfg
+
+
+Provided example configurations
+-------------------------------
+
+A few example configurations are provided with the source in the
+config directory. Pktgen scripts are provided to generate traffic for
+most of these configurations. The list of example applications is
+shown below:
+
+- handle_none.cfg
+
+	This is one of the most basic configurations. It sets up four
+	interfaces and five cores (one master core and four worker
+	cores). Packets are passed (i.e. without being touched) as
+	follows:
+
+		- interface 0 to interface 1 (handled by core 1)
+		- interface 1 to interface 0 (handled by core 2)
+		- interface 2 to interface 3 (handled by core 3)
+		- interface 3 to interface 2 (handled by core 4)
+
+	Pktgens script: pktgen-64bytes.sh
+
+- bng.cfg
+
+	This configuration sets up a Border Network Gateway (BNG) on
+	the first socket (socket 0). Four load balancers (two physical
+	cores, four logical cores) and eight workers (four physical
+	cores, eight logical cores) are set up. The number of workers
+	can be changed by uncommenting one of the lines in the
+	[variables] section. If this configuration is to be used on a
+	system with few cores, the number of workers need to be
+	reduced.
+
+	Pktgens script: pktgen-bng.sh
+
+- bng-qos.cfg
+
+	Compared to bng.cfg, this configuration sets up a BNG with QoS
+	functionality. In total, an extra eight cores (four physical
+	cores) are needed to run this configuration. Four cores are
+	used for QoSm, two cores are assigned with the task of
+	classifying upstream packets and two cores are assigned with
+	transmitting downstream packets.
+
+	Pktgens script: pktgen-bng.sh
+
+- bng-1q.cfg
+
+	This configuration sets up a system that handles the same
+	workload as bng.cfg. The difference is that on each of the
+	interfaces, only one queue is used. Use-cases for this
+	configuration include running in a virtualized environment
+	using SRIOV.
+
+	Pktgens script: pktgen-bng.sh
+
+- bng-ovs.cfg
+
+	This configuration can be used together with Open vSwitch. ARP
+	packets are not handled. Before using this configuration, the
+	program needs to be recompiled as follows:
+
+		make BNG_QINQ=n MPLS_ROUTING=n
+
+	Pktgens script: pktgen-bng-ovs.sh
+
+
+- lw_aftr.cfg
+
+	This configuration creates the functionality of a lwAFTR component
+	of the lw4over6 architecture as described in IETF draft
+	http://tools.ietf.org/id/draft-ietf-softwire-lw4over6-13.txt.
+	The lwAFTR simply terminates IPv6 tunnels that carry IPv4 traffic
+	for many customers (one tunnel per customer).	
+	It consists of two tasks:
+	1) ipv6_encap that encapsulates IPv4 packets into IPv6 and sends
+	those tunnel packets towards the customer tunnel endpoint. For this,
+	it must use a binding table that associates with each tunnel,
+	a public IPv4 address and a set of ports.
+	2) ipv6_decap which handles packet arriving from the tunnel, checks
+	they use a source IPv4 address and port combination that matches
+	their originating tunnel (based on the same binding table as used
+	by ipv6_encap), removes the IPv6 encapsulation and sends them out
+	its "internet" interface.
+	
+	By default, the binding table is in config/ipv6_tun_bind.csv.
+	Binding tables of different sizes and different ranges of addresses
+	and ports can be generated by a provided helper script:
+
+		helper-scripts/ipv6_tun/ipv6_tun_bindings.pl -n <num_entries>
+
+	Most other parameters of the generated binding table can be tweaked
+	through script command line switches. For more details, refer to the
+	documentation of the script obtained by running it with -help as
+	argument.
+	The same script can also generate tables for testing tools to generate
+	packets with addresses and ports that match entries from the binding
+	table (randomly selecting entries form the binding table).
